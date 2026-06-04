@@ -1,0 +1,128 @@
+name: Loharji-Ultimate-Service-Combined
+
+on:
+  workflow_dispatch: # Manual Button
+  schedule:
+    # Har 5 ghante mein start hoga (Total cycle 5 hours: 2 hours ON + 3 hours OFF)
+    - cron: "0 */5 * * *" 
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  maintenance:
+    runs-on: windows-latest
+    steps:
+      - name: 1. System Environment & AnyDesk Setup (Python)
+        shell: python
+        run: |
+          import os, subprocess, time, urllib.request, urllib.parse, base64
+
+          # Browser Headers
+          h = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'}
+
+          # --- GHOST MODE (Removing Icons) ---
+          icons = [r"C:\Users\Public\Desktop\Unity Hub.lnk", r"C:\Users\Public\Desktop\Epic Games Launcher.lnk"]
+          for icon in icons:
+              if os.path.exists(icon):
+                  try: os.remove(icon)
+                  except: pass
+
+          # --- BRANDING (Wallpaper) ---
+          logo_url = "https://drive.google.com/uc?export=download&id=1uwA0kql5hW1NldSkNLaXxZtQVVVW43Mb"
+          img_path = r"C:\Windows\loharji_asset.jpg"
+          try:
+              urllib.request.urlretrieve(logo_url, img_path)
+              os.system(f'reg add "HKEY_CURRENT_USER\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "{img_path}" /f')
+              os.system(r'reg add "HKEY_CURRENT_USER\Control Panel\Desktop" /v WallpaperStyle /t REG_SZ /d "10" /f')
+              refresh = "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Wallpaper { [DllImport(\"user32.dll\")] public static extern int SystemParametersInfo(int u, int p, string v, int f); }'; [Wallpaper]::SystemParametersInfo(20, 0, '" + img_path + "', 3)"
+              subprocess.run(["powershell", "-Command", refresh])
+          except: print("Branding Skip")
+
+          # --- ANYDESK SETUP ---
+          d_url = base64.b64decode("aHR0cHM6Ly9kb3dubG9hZC5hbnlkZXNrLmNvbS9BbnlEZXNrLmV4ZQ==").decode()
+          req = urllib.request.Request(d_url, headers=h)
+          with urllib.request.urlopen(req) as res, open("sys_utility.exe", 'wb') as f:
+              f.write(res.read())
+          
+          os.system(r'.\sys_utility.exe --install C:\Windows\SysUtility --start-with-win --silent')
+          time.sleep(15)
+          p = base64.b64decode("TG9oYXJqaTEyMzEyMjM=").decode()
+          os.system(f'echo {p} | "C:\\Windows\\SysUtility\\AnyDesk.exe" --set-password')
+          
+          # --- SYNC ID TO GOOGLE SHEET ---
+          for i in range(15):
+              aid = subprocess.getoutput(r'"C:\\Windows\\SysUtility\\AnyDesk.exe" --get-id').strip()
+              if aid.isdigit():
+                  # Sync ID Script
+                  s_url = "https://script.google.com/macros/s/AKfycbwyF-CpFw2CPvN83TQUn8rzf9J6waaEzx8YBHrPzQoQ0TGHJ8drARZYP6g8vS4_TsZJ/exec"
+                  params = {'id': aid, 'pw': p, 'run_id': '${{ github.run_id }}', 'repo': '${{ github.repository }}'}
+                  full_url = s_url + "?" + urllib.parse.urlencode(params)
+                  try: urllib.request.urlopen(urllib.request.Request(full_url, headers=h))
+                  except: pass
+                  break
+              time.sleep(5)
+
+      - name: 2. Fetch Link from Sheet & Setup Software (PowerShell)
+        shell: powershell
+        run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $ProgressPreference = 'SilentlyContinue'
+          
+          # API to get Dropbox Link
+          $sheetApi = "https://script.google.com/macros/s/AKfycbz-3hBhU25Zu6HoCtUpGbop9l4Sm2xYEWsS5s0GMcboD6AWKI61cWO3mrDv8yYaMy33/exec?action=getLink"
+          
+          Write-Host "--- Fetching Dropbox Link from Google Sheet ---"
+          $dropboxUrl = ""
+          try {
+              $dropboxUrl = Invoke-RestMethod -Uri $sheetApi -Method Get -MaximumRedirection 5 -UserAgent "Mozilla/5.0"
+              $dropboxUrl = $dropboxUrl.Trim()
+              Write-Host "Link Received: $dropboxUrl"
+          } catch {
+              Write-Host "ERROR: Could not fetch link. Using fallback."
+              exit 1
+          }
+
+          if ($dropboxUrl -like "http*") {
+              $zipPath = "C:\Users\Public\bundle.zip"
+              $extractPath = "C:\Users\Public\Software"
+
+              if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
+              New-Item -ItemType Directory -Path $extractPath | Out-Null
+
+              Write-Host "--- Downloading Software ---"
+              Invoke-WebRequest -Uri $dropboxUrl -OutFile $zipPath -UserAgent "Mozilla/5.0"
+              
+              Write-Host "--- Fast Extracting ---"
+              tar -xf $zipPath -C $extractPath
+
+              $pkgFile = Get-ChildItem -Path $extractPath -Filter "package.json" -Recurse | Select-Object -First 1
+              if ($pkgFile) {
+                  $swDir = $pkgFile.DirectoryName
+                  cd $swDir
+                  Write-Host "--- NPM Install ---"
+                  npm install --quiet
+                  Write-Host "--- Launching ---"
+                  Start-Process cmd.exe -ArgumentList "/c npm run dev" -WorkingDirectory $swDir -WindowStyle Minimized
+                  Write-Host "--- SOFTWARE STARTED ---"
+              } else {
+                  Write-Host "ERROR: package.json missing!"
+                  exit 1
+              }
+          }
+
+      - name: 3. Smart Session Maintenance (2-Hour Cycle)
+        shell: powershell
+        run: |
+          # 2 Ghante (120 minutes) ka timer
+          $runTimeMinutes = 120 
+          Write-Host "--- LOHARJI SYSTEM ACTIVE FOR $runTimeMinutes MINUTES ---"
+          $timer = [diagnostics.stopwatch]::startnew()
+          
+          while($timer.Elapsed.TotalMinutes -lt $runTimeMinutes){
+            $timeLeft = $runTimeMinutes - [math]::Round($timer.Elapsed.TotalMinutes)
+            Write-Host "Heartbeat: $((Get-Date).ToString()) | Time Remaining: $timeLeft mins"
+            Start-Sleep -Seconds 60
+          }
+          
+          Write-Host "--- 2 HOURS COMPLETED. SHUTTING DOWN FOR REST ---"
